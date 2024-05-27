@@ -6,11 +6,9 @@
 //1
 //月の終わりで通知する月のペア
 function sendMonthlyPairsToSlackIfFirstDayOfMonth() {
-  //月曜日の回数分のペアを作成
-  let pairs = pickPairsForMonth();   //2
-  notifyPairsToSlack(pairs);
-  backupPairsToSpreadsheet(pairs);   //10
-  
+  let { pairs, japanesePairs } = pickPairsForMonth(); //2
+  notifyPairsToSlack(pairs, japanesePairs);
+  backupPairsToSpreadsheet(pairs, japanesePairs); //10
 }
 
 //2
@@ -28,41 +26,37 @@ function pickPairsForMonth() {
 //3
 //ペアを選出するための関数
 function pickTwoRandomPeople(roster) {
-
-  //ペアを入れるための配列　例: [Aさん,Bさん]
   let selectedPeople = [];
   let pastSelections = [];
-
-
-  //すべてまとめるための関数　例:｛ [Aさん,Bさん], [Cさん,Dさん] ,・・｝
   let pairs = []; // ペア配列
 
+  let [englishRoster, japaneseNames] = roster;
   let monthMondaysCount = CountMonday();
-  console.log(monthMondaysCount);
 
-  //二人組のペアを作って
+  // 二人組のペアを作って
   for (let i = 0; i < monthMondaysCount; i++) {
     while (selectedPeople.length < 2) {
-      // 過去の選出結果がある場合、選出されていない人だけを roster から抽出
-      let availableRoster = roster.filter(person => !pastSelections.includes(person));
+      let availableRoster = englishRoster.filter(person => !pastSelections.includes(person));
 
-      // roster が空の場合、選出履歴をリセット
       if (availableRoster.length === 0) {
         pastSelections = [];
-        availableRoster = getRosterFromSpreadsheet(); // roster を元の状態に戻す
+        availableRoster = englishRoster.slice(); // roster を元の状態に戻す
       }
 
       let randomIndex = Math.floor(Math.random() * availableRoster.length);
       let selectedPerson = availableRoster[randomIndex];
       selectedPeople.push(selectedPerson);
-      pastSelections.push(selectedPerson); // 選出された人を過去の選出結果に追加
+      pastSelections.push(selectedPerson);
     }
     pairs.push(selectedPeople);
     selectedPeople = [];
   }
-  console.log(pairs);
-  return pairs;
+
+  let japanesePairs = getJapaneseNamesForPairs(pairs, englishRoster, japaneseNames);
+  console.log(pairs, japanesePairs);
+  return { pairs, japanesePairs };
 }
+
 
 //4
 //祝日の配列を返す関数
@@ -160,52 +154,39 @@ function NextMonthFirstMonday(){
 }
 
 //10
-//
-function notifyPairsToSlack(pairs) {
-  //来月の月の番号を取得(0スタート＋来月なので+2にした)
-  let month = new Date().getMonth() + 2 ;
+//ペアの通知
+function notifyPairsToSlack(pairs, japanesePairs) {
+  let month = new Date().getMonth() + 2;
   let month_English = ["January","February","March","April","May","June","July","August","September","October","November","December" ];
-
-  //掃除当番の日付リスト(基本月曜日祝日はずらす)を日本語verと英語verで取得
   const [messageHeaders,messageHeaders_English] = MondayList();
 
-  //let url = 'https://hooks.slack.com/services/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';     //旧鯖
+  //let url = 'https://hooks.slack.com/services/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'; // テスト用鯖
   let url = 'https://hooks.slack.com/services/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';
-
-
   
-  console.log(messageHeaders);
+  
   postMessageToSlack(url,"----------------Japanese---------------------");
   postMessageToSlack(url,month +"月のごみ当番のお知らせです。");
 
-  let i=0;
-  pairs.forEach(pair => {
-    let text = messageHeaders[i]+": " + pair.join(", ");
+  pairs.forEach((pair, i) => {
+    let text = messageHeaders[i] + ": " + japanesePairs[i].join(", ") ;
     postMessageToSlack(url, text);
-    i++
   });
 
   postMessageToSlack(url,"----------------English---------------------");
+  postMessageToSlack(url,"Here is the notice for the  "+month_English[month-1]+" garbage duty");
 
-   postMessageToSlack(url,"Here is the notice for the  "+month_English[month-1]+" garbage duty");
-
-  i=0;
-  pairs.forEach(pair => {
-    let text = messageHeaders_English[i]+": " + pair.join(", ");
+  pairs.forEach((pair, i) => {
+    let text = messageHeaders_English[i] + ": " + pair.join(", ");
     postMessageToSlack(url, text);
-    i++
   });
-
-
-
 }
 
 
 //11
 //当番表にコピーする
-function backupPairsToSpreadsheet(pairs) {
+function backupPairsToSpreadsheet(pairs, japanesePairs) {
   let messageHeaders = [];
-  
+
   //次の月の日付を取得
   let today = new Date();
   let nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -220,7 +201,8 @@ function backupPairsToSpreadsheet(pairs) {
 
   // ヘッダーを設定
   sheet.getRange("A1").setValue("日付");
-  sheet.getRange("B1").setValue("ペア");
+  sheet.getRange("B1").setValue("英語名のペア");
+  sheet.getRange("C1").setValue("日本語名のペア");
 
   // ペアと日付の情報を配列に追加
   let pairsWithDates = [];
@@ -240,29 +222,29 @@ function backupPairsToSpreadsheet(pairs) {
   pairs.forEach((pair, index) => {
     pairsWithDates.push({
       date: messageHeaders[index],
-      pair: pair.join(", ")
+      englishPair: pair.join(", "),
+      japanesePair: japanesePairs[index].join(", ")
     });
-
   });
 
   // スプレッドシートに出力
   pairsWithDates.forEach((pair, index) => {
     sheet.getRange(index + 2, 1).setValue(pair.date);
-    sheet.getRange(index + 2, 2).setValue(pair.pair);
+    sheet.getRange(index + 2, 2).setValue(pair.englishPair);
+    sheet.getRange(index + 2, 3).setValue(pair.japanesePair);
   });
 
-
   //その月の当番シートにも決めた当番表を反映させる
-  let ms = SpreadsheetApp.getActiveSpreadsheet();
-  let monthly_sheet = ms.getSheetByName(firstMondayDate.getMonth()+"月");
+  let monthly_sheet = ss.getSheetByName(firstMondayDate.getMonth() + "月");
   if (!monthly_sheet) {
     Logger.log("指定されたシートが見つかりません。");
     return;
   }
-    // スプレッドシートに出力
+
   pairsWithDates.forEach((pair, index) => {
     monthly_sheet.getRange(index + 2, 1).setValue(pair.date);
-    monthly_sheet.getRange(index + 2, 2).setValue(pair.pair);
+    monthly_sheet.getRange(index + 2, 2).setValue(pair.englishPair);
+    monthly_sheet.getRange(index + 2, 3).setValue(pair.japanesePair);
   });
 }
 
@@ -337,36 +319,42 @@ function getRosterFromSpreadsheet() {
   }
   let lastRow = sheet.getLastRow();
   let roster = sheet.getRange("A2:A" + lastRow).getValues().flat().filter(Boolean);
-  return roster;
+  let japaneseNames = sheet.getRange("B2:B" + lastRow).getValues().flat().filter(Boolean);
+  return [roster, japaneseNames];
 }
 
 
+//15
+//ペアの日本語名を取得する関数
+function getJapaneseNamesForPairs(pairs, englishRoster, japaneseNames) {
+  let japanesePairs = pairs.map(pair => {
+    return pair.map(person => {
+      let index = englishRoster.indexOf(person);
+      return japaneseNames[index];
+    });
+  });
+  return japanesePairs;
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////////
 
 
-
-
-//週の終わりで通知する今週のペア
+// 週の終わりで通知する今週のペア
 function sendWeeklyPairsToSlackIfFirstDayOfMonth() {
-  //let url = 'https://hooks.slack.com/services/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';
+  //let url = 'https://hooks.slack.com/services/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'; // テスト用鯖
   let url = 'https://hooks.slack.com/services/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';
 
-
-  let nextMonday = NextMonday()
-
+  let nextMonday = NextMonday();
 
   let month = nextMonday.getMonth() + 1;
   let date = nextMonday.getDate();
   let monthString = month < 10 ? '0' + month : '' + month;
   let dateString = date < 10 ? '0' + date : '' + date;
-  
-  
 
   // スプレッドシートから該当する日付のペアを取得
   let ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(month+"月"); // 月ごとのシートを取得
+  let sheet = ss.getSheetByName(month + "月"); // 月ごとのシートを取得
   if (!sheet) {
     Logger.log("指定されたシートが見つかりません。");
     return;
@@ -375,34 +363,34 @@ function sendWeeklyPairsToSlackIfFirstDayOfMonth() {
   // 日付とペアの情報を取得
   let pairs = [];
   let lastRow = sheet.getLastRow();
-  console.log("lastRow"+lastRow);
+  console.log("lastRow" + lastRow);
   for (let i = 2; i <= lastRow; i++) {
     let cellValue = sheet.getRange(i, 1).getValue();
     let cellDate = new Date(cellValue).getDate(); // 日付のみ抽出
-    console.log("cellDate"+cellDate);
-      
+    console.log("cellDate" + cellDate);
+
     if (cellDate == date) { // 日付の比較
-      let pair = [
-        sheet.getRange(i, 2).getValue(),
-        sheet.getRange(i, 3).getValue()
-      ];
-      console.log("pair"+pair);
+      let pair = {
+        english: sheet.getRange(i, 2).getValue(),
+        japanese: sheet.getRange(i, 3).getValue()
+      };
+      console.log("pair" + pair);
       pairs.push(pair);
     }
   }
   console.log(pairs);
   // 取得したペアをSlackに通知
   pairs.forEach(pair => {
-    let text =pair.join(", ");
-    postMessageToSlack(url,"----------------Japanese---------------------");
-    let message = "お疲れ様です。\n来週"+monthString + "月" + dateString + "日"+"の当番は" +text+"です。\nよろしくお願いします。" ;
+    postMessageToSlack(url, "----------------Japanese---------------------");
+    let japaneseNames = pair.japanese.split(',').map(name => name.trim() + "さん").join('と');
+    let message = "お疲れ様です。\n来週" + monthString + "月" + dateString + "日" + "の当番は" + japaneseNames + "です。\nよろしくお願いします。";
     postMessageToSlack(url, message);
 
-    
-    postMessageToSlack(url,"----------------English---------------------");
-    let message_English = "Thank you for your hard work. \nThe duty for " + monthString + "/" + dateString + " next week is " + text + ".\nWe appreciate your cooperation.";
+    postMessageToSlack(url, "----------------English---------------------");
+    let message_English = "Thank you for your hard work. \nThe duty for " + monthString + "/" + dateString + " next week is " + pair.english + ".\nWe appreciate your cooperation.";
     postMessageToSlack(url, message_English);
   });
 }
+
 
 
